@@ -1,0 +1,7 @@
+# dsh-media-inline-preview bundle layer: mount the host plugin row. The client
+# half is auto-discovered by dsh-client-modules via the package's `dsh.client`
+# + `exports["./client"]` declaration (served at
+# /plugins/dsh-media-inline-preview/client.js).
+- insert:
+    - id: dsh-media-inline-preview
+      name: dsh-media-inline-preview
