@@ -45,7 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frontend's incremental renderer, which reuses its element across re-renders).
   Last-block fences keep waiting for the message to settle. Injected media
   elements carry a `_dshMediaMounted` marker, so a wrapper node replaced by
-  the settle re-render adopts the existing mount instead of duplicating it.
+  the settle re-render adopts the existing mount when it survives as the
+  wrapper's next sibling.
 - Player robustness (fixes intermittent "无法播放" cards): every player now
   retries ONCE before showing an error card — transcoded for containers the
   browser cannot decode, same source after a short pause otherwise (transient
@@ -62,3 +63,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - System-prompt fence spec: `label` is documented as accepted-for-compat only —
   the UI always shows the file name.
 - README/DESIGN rewritten for public consumption (no machine-local paths).
+- Settle-render dedup is now ownership-based and position-agnostic (fixes
+  "one fence renders as two identical cards until a hard refresh"). On settle
+  the frontend re-parses the message with a different React key scheme
+  (absolute text offsets → array indices), so it deletes every block after the
+  first and re-inserts a fresh code-block wrapper at a position that can leave
+  an early-mounted media figure stranded IN FRONT of the new wrapper — the
+  adjacent-sibling adoption could not see that and a second mount doubled the
+  media. Every mount now records its owning wrapper (`_dshMediaOwner`) and
+  media identity (`_dshMediaKey`); adoption transfers ownership, and a sweep
+  removes any same-media mount whose owner left the document (the stranded
+  duplicate) while leaving whole-subtree detaches (chat virtualization) intact
+  for a reattach adoption. Applies to img, video and audio alike.
+  (regression scenarios in `test/client-smoke.mjs`)

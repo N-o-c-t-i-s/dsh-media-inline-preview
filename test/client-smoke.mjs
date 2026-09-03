@@ -57,6 +57,13 @@ class FakeElement {
     this.parentElement.children.splice(i + 1, 0, el);
     el.parentElement = this.parentElement;
   }
+  remove() {
+    const p = this.parentElement;
+    if (p === null) return;
+    const i = p.children.indexOf(this);
+    if (i !== -1) p.children.splice(i, 1);
+    this.parentElement = null;
+  }
   get nextElementSibling() {
     if (this.parentElement === null) return null;
     const siblings = this.parentElement.children;
@@ -801,6 +808,111 @@ if (rotV.src.includes("TOK-B")) {
 console.log("✓ secret rotation self-heals via forced re-mint:", rotV.src);
 
 globalThis.fetch = realFetch; // restore the real (absent) fetch for dispose
+
+// ---------------------------------------------------------------------------
+// Scenario 25: settle re-render inserts the replacement wrapper AFTER the
+// surviving figure (the REAL React ordering — the settle parse keys markdown
+// blocks by array index while the streaming parse keys them by absolute text
+// offset, so on settle React deletes every block after the first and re-inserts
+// the new wrapper before its next *known* sibling, which sits AFTER our
+// figure). The figure ends up stranded BEFORE the new wrapper, the
+// adjacent-sibling adoption cannot see it, and a naive second mount would
+// double the media. The stranded duplicate must be evicted: one fence ⇒ one
+// mount, mounted after the settled wrapper.
+// ---------------------------------------------------------------------------
+
+// (a) img fence with trailing content: early mount, then the settle swap.
+const staleMsg = new FakeElement("div");
+body.appendChild(staleMsg);
+const settleLead = new FakeElement("p");
+settleLead.textContent = "lead";
+const settleFence1 = makeCodeBlock("img", '```img\n{"path":"/tmp/media/settle_dup.png"}\n```', { withInfostring: "" });
+const settleTail = new FakeElement("p");
+settleTail.textContent = "after fence";
+staleMsg.appendChild(settleLead);
+staleMsg.appendChild(settleFence1);
+staleMsg.appendChild(settleTail);
+mutate(); // fence has a following sibling → early mount
+if (staleMsg.querySelectorAll(".img-preview-grid").length !== 1) {
+  throw new Error("settle-dup: early streaming fence must mount exactly once");
+}
+const earlyGrid = staleMsg.children[staleMsg.children.indexOf(settleFence1) + 1];
+if (!earlyGrid || earlyGrid.className !== "img-preview-grid") throw new Error("settle-dup: early img mount missing");
+// Settle: React deletes the old wrapper and inserts the new one AFTER the
+// surviving figure (its next known fiber sibling is the trailing paragraph).
+staleMsg.children.splice(staleMsg.children.indexOf(settleFence1), 1);
+settleFence1.parentElement = null;
+const settleFence2 = makeCodeBlock("img", '```img\n{"path":"/tmp/media/settle_dup.png"}\n```'); // settled: infostring = "img"
+const afterGridIdx = staleMsg.children.indexOf(earlyGrid) + 1;
+staleMsg.children.splice(afterGridIdx, 0, settleFence2);
+settleFence2.parentElement = staleMsg;
+mutate([{ type: "childList", addedNodes: [settleFence2] }]); // observer sees the new wrapper
+const gridsAfter = staleMsg.querySelectorAll(".img-preview-grid");
+if (gridsAfter.length !== 1) {
+  throw new Error(`settle-dup: one fence must show ONE image, got ${gridsAfter.length} grids`);
+}
+if (gridsAfter[0] === earlyGrid) throw new Error("settle-dup: the stranded figure must be evicted");
+const newGrid = settleFence2.nextElementSibling;
+if (!newGrid || newGrid.className !== "img-preview-grid") {
+  throw new Error("settle-dup: the mount must sit directly after the settled wrapper");
+}
+if (settleFence2.style.display !== "none") throw new Error("settle-dup: settled wrapper must be hidden");
+mutate([]); // a later full scan (3s fallback) must not resurrect a duplicate
+if (staleMsg.querySelectorAll(".img-preview-grid").length !== 1) {
+  throw new Error("settle-dup: a later full scan must not duplicate the mount");
+}
+console.log("✓ settle re-render behind the figure: stale duplicate evicted, single image");
+
+// (b) same ordering on a video fence — the stranded player is torn down and a
+// single fresh player sits after the settled wrapper.
+const staleVMsg = new FakeElement("div");
+body.appendChild(staleVMsg);
+const settleVLead = new FakeElement("p");
+settleVLead.textContent = "vlead";
+const vFence1 = makeCodeBlock("video", '```video\n{"path":"/tmp/media/settle_vid.mp4"}\n```', { withInfostring: "" });
+const vTail = new FakeElement("p");
+vTail.textContent = "vtail";
+staleVMsg.appendChild(settleVLead);
+staleVMsg.appendChild(vFence1);
+staleVMsg.appendChild(vTail);
+mutate();
+await flush(); // token gate settles; the early player arms its load
+const vEarlyFig = staleVMsg.children[staleVMsg.children.indexOf(vFence1) + 1];
+if (!vEarlyFig || vEarlyFig.querySelectorAll("video").length !== 1) {
+  throw new Error("settle-dup video: early player mount missing");
+}
+staleVMsg.children.splice(staleVMsg.children.indexOf(vFence1), 1);
+vFence1.parentElement = null;
+const vFence2 = makeCodeBlock("video", '```video\n{"path":"/tmp/media/settle_vid.mp4"}\n```');
+const vAfterIdx = staleVMsg.children.indexOf(vEarlyFig) + 1;
+staleVMsg.children.splice(vAfterIdx, 0, vFence2);
+vFence2.parentElement = staleVMsg;
+mutate([{ type: "childList", addedNodes: [vFence2] }]);
+await flush();
+const vFigs = staleVMsg.querySelectorAll(".dsh-media-player");
+if (vFigs.length !== 1) {
+  throw new Error(`settle-dup video: one fence must show ONE player, got ${vFigs.length}`);
+}
+if (vFigs[0] === vEarlyFig) throw new Error("settle-dup video: the stranded player must be evicted");
+const newFig = vFence2.nextElementSibling;
+if (!newFig || newFig.className !== "dsh-media-player") {
+  throw new Error("settle-dup video: the player must sit after the settled wrapper");
+}
+console.log("✓ settle re-render behind the figure: stale duplicate evicted, single player");
+
+// (c) deliberate duplicates: two IDENTICAL fences in one settled message are
+// two real mounts — a mount owned by a live wrapper must never be evicted.
+const dupMsg = new FakeElement("div");
+body.appendChild(dupMsg);
+const dupA = makeCodeBlock("img", '```img\n{"path":"/tmp/media/twice.png"}\n```');
+const dupB = makeCodeBlock("img", '```img\n{"path":"/tmp/media/twice.png"}\n```');
+dupMsg.appendChild(dupA);
+dupMsg.appendChild(dupB);
+mutate();
+if (dupMsg.querySelectorAll(".img-preview-grid").length !== 2) {
+  throw new Error("two identical img fences in one message must BOTH keep their mounts");
+}
+console.log("✓ deliberate duplicate fences keep their own mounts (owner alive)");
 
 // ---------------------------------------------------------------------------
 // Scenario 12: dispose stops everything
