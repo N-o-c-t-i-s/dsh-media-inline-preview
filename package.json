@@ -1,7 +1,7 @@
 {
   "name": "dsh-media-inline-preview",
   "description": "All-in-one inline media for DeepSeek Harness chat: ```img / ```video / ```audio fences render images (cards + lightbox + grids, TGA→PNG), native <video> and <audio> players right inside the message (house pattern of img-preview/dsh-mermaid/pbr-render). Image route whole-reads local workspace images; media route streams with HTTP Range seeking and an ffmpeg transcode fallback (cached) for containers browsers cannot play (mkv/avi/flv/wma...). Trust-fenced (loopback + webRuntime.trustedHosts) so LAN/mobile access keeps working. Supersedes the separate img-preview + video/audio fence plugins.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "main": "lib/index.js",
   "author": "seeingrain",
