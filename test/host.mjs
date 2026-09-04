@@ -239,7 +239,7 @@ class FakeRes extends Writable {
 }
 const fakeRes = () => new FakeRes();
 
-// Secret: auto-generated once (0600), cached, 64 hex chars.
+// Shared key material: auto-generated once (0600), cached, 64 hex chars.
 const secretA = tokenSecret();
 assert.equal(/^[0-9a-f]{64}$/.test(secretA), true);
 assert.equal(tokenSecret(), secretA, "secret must be cached across calls");
