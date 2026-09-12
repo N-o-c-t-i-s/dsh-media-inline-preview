@@ -5,7 +5,7 @@
 
 > 🇨🇳 中文: [README.md](README.md)
 
-**The all-in-one media viewer for DeepSeek Harness (DSH) chat** — one plugin, three fences (```` ```img ```` / ```` ```video ```` / ```` ```audio ````), covering **36 local media formats**. Images render as cards with a full-screen lightbox, video/audio render as native players — all **inline inside chat messages**: no sidebar, no new tabs, mounting even while the message is still streaming. Merges and supersedes the separate img-preview (image fence) and video/audio fence plugins.
+**The all-in-one media viewer for DeepSeek Harness (DSH) chat** — one plugin, three fences (```` ```mip-img ```` / ```` ```mip-video ```` / ```` ```mip-audio ````), covering **36 local media formats**. Images render as cards with a full-screen lightbox, video/audio render as native players — all **inline inside chat messages**: no sidebar, no new tabs, mounting even while the message is still streaming. Merges and supersedes the separate img-preview (image fence) and video/audio fence plugins.
 
 ## 📱 Preview
 
@@ -32,31 +32,33 @@
 - **Bandwidth-friendly**: ETag / `If-None-Match` conditional GET on both routes (unchanged files revalidate with a 304 and zero transfer); TGA→PNG and ffmpeg transcode results disk-cached; players lazy-load via IntersectionObserver until scrolled into view.
 - **Fence syntax persists** — the fence is just Markdown, so session history keeps it natively; reloading never loses media.
 - **Streaming early mount** — once a fence inside a still-streaming message is settled (full JSON spec + a following sibling proves closure), it mounts and plays immediately instead of waiting for the message to finish.
-- **Zero configuration** — after install, when media files appear or are produced in a session the agent calls `img_serve` / `media_serve` first and emits the fence; cards/players show up right in the message. Hand-written fences work too (below).
+- **Zero configuration** — after install, when media files appear or are produced in a session the agent calls `mip_img` / `mip_media` first and emits the fence; cards/players show up right in the message. Hand-written fences work too (below).
 
 ## Fence syntax
 
-```img
+```mip-img
 {"path":"/absolute/path/to/image.png","label":"optional"}
 ```
-```video
+```mip-video
 {"path":"/absolute/path/to/video.mp4","label":"optional"}
 ```
-```audio
+```mip-audio
 {"path":"/absolute/path/to/music.mp3","label":"optional"}
 ```
+
+> **The fence tags are namespaced (`mip-*`) since v1.4.0 — a breaking change.** Generic words like `img`/`video`/`audio` are claimed by other plugins too (the third-party img-preview plugin ships ```img itself), and nothing arbitrates a fence tag: DSH core has no fence registry, every client plugin scans the DOM on its own, so two claimants both mount and a single fence shows two figures. Hence `mip-img` / `mip-video` / `mip-audio`; **the old bare tags are no longer recognized** and stay plain code blocks.
 
 The `label` field is still parsed (hand-written fence compatibility), but the UI caption always shows the file name. Multi-image grid: `{"images":[{"path":"..."},{"path":"..."}]}`.
 
 ## Architecture (house pattern)
 
-- **host (`lib/index.js`)** — `systemPrompt.section` injects the unified fence teaching (three fences + active triggering + dedup); `img_serve` / `media_serve` tools validate paths and return `{ok, ..., path, url}`; routes:
+- **host (`lib/index.js`)** — `systemPrompt.section` injects the unified fence teaching (three fences + active triggering + dedup); `mip_img` / `mip_media` tools validate paths and return `{ok, ..., path, url}`; routes:
   - `/plugins/dsh-media-inline-preview/files` — image route (whole-read, 128 MiB cap, TGA→PNG on the fly with disk cache, `ACAO *`)
   - `/plugins/dsh-media-inline-preview/media` — media route (Range streaming, 2 GiB cap, `?tc=1` transcode fallback)
   - `/plugins/dsh-media-inline-preview/token` + `__media_auth` — **file-scoped HMAC tokens** (`?dsh_tok=`): a credential bound to a single file's realpath, verified as an nginx `auth_request` target, so cookieless system media pipelines (e.g. Android's `stagefright`, which fetches media in its own process without the browser's cookies) can stream through a cookie-gated reverse proxy; the secret is auto-generated per deployment (0600, outside the workspace) and rotation is live (a rotated secret self-heals via a forced re-mint on the failure retry).
 - **client (`lib/client.js`)** — `window.__ModuleLoader__` registration; incremental MutationObserver scan (rAF-coalesced, plus a 3s full-pass fallback) with **three-tier collision-free detection**:
-  1. `div.infostring` text exactly `img`/`video`/`audio` (primary; empty while streaming so half-streamed fences never match)
-  2. Text opens with `` ```img `` / `` ```video `` / `` ```audio `` (surface fallback)
+  1. `div.infostring` text exactly `mip-img`/`mip-video`/`mip-audio` (primary; empty while streaming so half-streamed fences never match)
+  2. Text opens with `` ```mip-img `` / `` ```mip-video `` / `` ```mip-audio `` (surface fallback)
   3. JSON spec kind inferred from the `path` extension (disjoint extension sets — a bare JSON body never cross-triggers another media kind)
   
   Nested `pre` inside a wrapper is skipped (single mount target, no double-mount); playback failure auto-retries `?tc=1`, a second failure swaps in an error card.
@@ -66,7 +68,7 @@ The `label` field is still parsed (hand-written fence compatibility), but the UI
 
 ## Usage
 
-After installation nothing to configure: when images/videos/audio appear or are produced in a session, the agent calls `img_serve` / `media_serve` first, then emits the fence — cards/players show up right in the message. You can also hand-write the fences above.
+After installation nothing to configure: when images/videos/audio appear or are produced in a session, the agent calls `mip_img` / `mip_media` first, then emits the fence — cards/players show up right in the message. You can also hand-write the fences above.
 
 ## Tests
 

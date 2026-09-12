@@ -1,8 +1,9 @@
 /**
  * Client smoke test: loads lib/client.js in a stubbed browser environment and
  * verifies:
- *  - fence detection (infostring tier 1, ```tag tier 2, JSON-spec extension
- *    tier 3) for all three fence languages
+ *  - fence detection (infostring tier 1, literal-tag tier 2, JSON-spec
+ *    extension tier 3) for all three namespaced fence tags (mip-img/mip-video/
+ *    mip-audio), and that the bare img/video/audio tags are NOT claimed
  *  - cross-kind collision safety (a video spec never mounts as an image)
  *  - streaming skip, malformed-spec skip
  *  - img mounting (single card, grid, url-only) with the files route URL
@@ -295,11 +296,11 @@ const FILES_URL = "/plugins/dsh-media-inline-preview/files/";
 const MEDIA_URL = "/plugins/dsh-media-inline-preview/media/";
 
 // ---------------------------------------------------------------------------
-// Scenario 1: settled ```video fence with infostring → mounts <video>
+// Scenario 1: settled ```mip-video fence with infostring → mounts <video>
 // ---------------------------------------------------------------------------
 
 const body = documentStub.body;
-const videoFence = makeCodeBlock("video", '```video\n{"path":"/tmp/media/xhs_video.mp4","label":"测试视频"}\n```');
+const videoFence = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/media/xhs_video.mp4","label":"测试视频"}\n```');
 body.appendChild(videoFence);
 mutate();
 const videoEl = videoFence.parentElement.querySelectorAll("video");
@@ -311,10 +312,10 @@ if (!src.includes("/tmp/media/xhs_video.mp4")) throw new Error(`src must carry t
 console.log("✓ video fence mounts (infostring tier):", src);
 
 // ---------------------------------------------------------------------------
-// Scenario 2: ```audio fence via ```tag fallback (empty infostring) → <audio>
+// Scenario 2: ```mip-audio fence via literal-tag fallback (empty infostring)
 // ---------------------------------------------------------------------------
 
-const audioFence = makeCodeBlock("audio", '```audio\n{"path":"/tmp/media/xhs_music.mp3"}\n```', { withInfostring: "" });
+const audioFence = makeCodeBlock("mip-audio", '```mip-audio\n{"path":"/tmp/media/xhs_music.mp3"}\n```', { withInfostring: "" });
 body.appendChild(audioFence);
 mutate();
 const audioEls = audioFence.parentElement.querySelectorAll("audio");
@@ -329,7 +330,7 @@ console.log("✓ audio fence mounts (tag tier):", audioEls[0].src);
 const streamingMsg = new FakeElement("div"); // message root with data-streaming
 streamingMsg.attributes.set("data-streaming", "1");
 body.appendChild(streamingMsg);
-const streamingFence = makeCodeBlock("video", '```video\n{"path":"/tmp/v.mp4"}\n```', { withInfostring: "" });
+const streamingFence = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/v.mp4"}\n```', { withInfostring: "" });
 streamingMsg.appendChild(streamingFence); // last block of the streaming message
 mutate();
 if (body.querySelectorAll("video").length !== 1) throw new Error("last streaming fence must not mount");
@@ -339,7 +340,7 @@ console.log("✓ streaming: last fence waits for settle");
 // Scenario 4: malformed JSON (half-streamed) does not mount
 // ---------------------------------------------------------------------------
 
-const badFence = makeCodeBlock("video", '```video\n{"path":"/tmp/broken.mp"\n```', { withInfostring: false });
+const badFence = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/broken.mp"\n```', { withInfostring: false });
 body.appendChild(badFence);
 mutate();
 if (body.querySelectorAll("video").length !== 1) throw new Error("malformed fence must not mount");
@@ -349,7 +350,7 @@ console.log("✓ malformed fence skipped");
 // Scenario 5: unsupported-container error → tc retry swaps src
 // ---------------------------------------------------------------------------
 
-const mkvFence = makeCodeBlock("video", '```video\n{"path":"/tmp/media/demo.mkv"}\n```');
+const mkvFence = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/media/demo.mkv"}\n```');
 body.appendChild(mkvFence);
 mutate();
 const mkvVideo = [...body.querySelectorAll("video")].find((v) => v.src.includes("demo.mkv"));
@@ -369,7 +370,7 @@ console.log("✓ second failure swaps to error card");
 // Scenario 6: img fence (infostring tier) → single card under the files route
 // ---------------------------------------------------------------------------
 
-const imgFence = makeCodeBlock("img", '```img\n{"path":"/tmp/media/pic.png","label":"截图"}\n```');
+const imgFence = makeCodeBlock("mip-img", '```mip-img\n{"path":"/tmp/media/pic.png","label":"截图"}\n```');
 body.appendChild(imgFence);
 mutate();
 const imgGrids = body.querySelectorAll(".img-preview-grid");
@@ -392,7 +393,7 @@ const gridSpec = JSON.stringify({
     { path: "" } // invalid entry — must be dropped
   ]
 });
-const gridFence = makeCodeBlock("img", "```img\n" + gridSpec + "\n```");
+const gridFence = makeCodeBlock("mip-img", "```mip-img\n" + gridSpec + "\n```");
 body.appendChild(gridFence);
 mutate();
 if (body.querySelectorAll("img").length !== 3) throw new Error(`expected 3 img cards (1+2), got ${body.querySelectorAll("img").length}`);
@@ -402,7 +403,7 @@ console.log("✓ img grid mounts 2 valid cards (invalid entry dropped)");
 // Scenario 8: url-only img spec → card src is the external URL
 // ---------------------------------------------------------------------------
 
-const urlFence = makeCodeBlock("img", '```img\n{"url":"https://example.com/x.png","label":"远程图"}\n```');
+const urlFence = makeCodeBlock("mip-img", '```mip-img\n{"url":"https://example.com/x.png","label":"远程图"}\n```');
 body.appendChild(urlFence);
 mutate();
 const urlImgs = body.querySelectorAll("img");
@@ -431,7 +432,7 @@ if (body.querySelectorAll("video").length !== 2) throw new Error(`bare JSON mp4 
 if (body.querySelectorAll("img").length !== 5) throw new Error("bare JSON mp4 must NOT mount an image card");
 // (b) an infostring "video" block with a JSON body stays a video even though
 // the body is also a parseable img-spec shape.
-const clashFence = makeCodeBlock("video", '{"path":"/tmp/media/d.mp4"}');
+const clashFence = makeCodeBlock("mip-video", '{"path":"/tmp/media/d.mp4"}');
 body.appendChild(clashFence);
 mutate();
 if (body.querySelectorAll("video").length !== 3) throw new Error(`infostring video must win over spec shape (expected 3 videos, got ${body.querySelectorAll("video").length})`);
@@ -442,7 +443,7 @@ console.log("✓ cross-kind collision safe (mp4→video, infostring wins)");
 // Scenario 11: TGA img spec mounts (host transcodes to PNG on serve)
 // ---------------------------------------------------------------------------
 
-const tgaFence = makeCodeBlock("img", '```img\n{"path":"/tmp/media/snap.tga"}\n```');
+const tgaFence = makeCodeBlock("mip-img", '```mip-img\n{"path":"/tmp/media/snap.tga"}\n```');
 body.appendChild(tgaFence);
 mutate();
 const tgaImgs = body.querySelectorAll("img");
@@ -530,7 +531,7 @@ console.log("✓ lightbox pinch zooms + two-finger drag pans (all four direction
 // Scenario 16: incremental scan — records-driven mutation mounts new fences
 // without a full-document pass
 // ---------------------------------------------------------------------------
-const incFence = makeCodeBlock("video", '```video\n{"path":"/tmp/media/inc.mp4"}\n```');
+const incFence = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/media/inc.mp4"}\n```');
 body.appendChild(incFence);
 mutate([{ type: "childList", addedNodes: [incFence] }]);
 const incVideos = body.querySelectorAll("video");
@@ -544,7 +545,7 @@ console.log("✓ incremental scan mounts fences from mutation records");
 // the IntersectionObserver reports it in view
 // ---------------------------------------------------------------------------
 globalThis.__ioAutoFire = false;
-const lazyFence = makeCodeBlock("audio", '```audio\n{"path":"/tmp/media/lazy.mp3"}\n```');
+const lazyFence = makeCodeBlock("mip-audio", '```mip-audio\n{"path":"/tmp/media/lazy.mp3"}\n```');
 body.appendChild(lazyFence);
 mutate([{ type: "childList", addedNodes: [lazyFence] }]);
 const lazyAudio = [...body.querySelectorAll("audio")].find((a) => a.src.includes("lazy.mp3"));
@@ -567,7 +568,7 @@ console.log("✓ lazy loading: players wait for the viewport (IntersectionObserv
 const streamMsg = new FakeElement("div"); // message root (data-streaming on ancestor)
 streamMsg.attributes.set("data-streaming", "1");
 body.appendChild(streamMsg);
-const earlyFence = makeCodeBlock("video", '```video\n{"path":"/tmp/media/early.mp4"}\n```', { withInfostring: "" });
+const earlyFence = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/media/early.mp4"}\n```', { withInfostring: "" });
 const earlyTail = new FakeElement("p");
 earlyTail.textContent = "trailing text";
 streamMsg.appendChild(earlyFence);
@@ -586,7 +587,7 @@ console.log("✓ streaming: settled fence mounts early (before the message ends)
 // then mounts once content follows it
 // ---------------------------------------------------------------------------
 
-const lastFence = makeCodeBlock("img", '```img\n{"path":"/tmp/img/late.png"}\n```', { withInfostring: "" });
+const lastFence = makeCodeBlock("mip-img", '```mip-img\n{"path":"/tmp/img/late.png"}\n```', { withInfostring: "" });
 streamMsg.appendChild(lastFence); // last child → the fence may still be open
 mutate();
 if (streamMsg.querySelectorAll(".img-preview-grid").length !== 0) {
@@ -606,7 +607,7 @@ console.log("✓ streaming: last fence waits, then mounts when a following sibli
 // surviving injected figure is adopted, no duplicate media, source hidden
 // ---------------------------------------------------------------------------
 
-const replacedWrapper = makeCodeBlock("video", '```video\n{"path":"/tmp/media/early.mp4"}\n```', { withInfostring: "" });
+const replacedWrapper = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/media/early.mp4"}\n```', { withInfostring: "" });
 {
   const i = streamMsg.children.indexOf(earlyFence);
   if (i === -1) throw new Error("early fence not found in stream message");
@@ -629,7 +630,7 @@ console.log("✓ wrapper replaced on re-render: existing mount adopted, no dupli
 const settleMsg = new FakeElement("div");
 settleMsg.attributes.set("data-streaming", "1");
 body.appendChild(settleMsg);
-const settleFence = makeCodeBlock("audio", '```audio\n{"path":"/tmp/media/settle.mp3"}\n```', { withInfostring: "" });
+const settleFence = makeCodeBlock("mip-audio", '```mip-audio\n{"path":"/tmp/media/settle.mp3"}\n```', { withInfostring: "" });
 settleMsg.appendChild(settleFence);
 mutate();
 if (settleMsg.querySelectorAll("audio").length !== 0) throw new Error("waiting fence must not mount while streaming");
@@ -645,7 +646,7 @@ console.log("✓ settle transition: waiting fence mounts exactly once");
 
 const virtMsg = new FakeElement("div");
 body.appendChild(virtMsg);
-const virtFence = makeCodeBlock("video", '```video\n{"path":"/tmp/media/virt.mp4"}\n```', { withInfostring: "" });
+const virtFence = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/media/virt.mp4"}\n```', { withInfostring: "" });
 const virtTail = new FakeElement("p");
 virtTail.textContent = "tail";
 virtMsg.appendChild(virtFence);
@@ -673,7 +674,7 @@ console.log("✓ detach/reattach: adopted player revives its load, no duplicate"
 documentStub.hidden = true;
 const visMsg = new FakeElement("div");
 body.appendChild(visMsg);
-const visFence = makeCodeBlock("audio", '```audio\n{"path":"/tmp/media/vis.mp3"}\n```');
+const visFence = makeCodeBlock("mip-audio", '```mip-audio\n{"path":"/tmp/media/vis.mp3"}\n```');
 visMsg.appendChild(visFence);
 mutate();
 await flush(); // token gate: the hidden-tab deferral (vis listener) arms async
@@ -712,7 +713,7 @@ globalThis.fetch = (url) => {
 };
 
 // (a) Video with a media-route src → src gains ?dsh_tok=; exactly one mint.
-const tokFence = makeCodeBlock("video", '```video\n{"path":"/tmp/media/tok.mp4"}\n```');
+const tokFence = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/media/tok.mp4"}\n```');
 body.appendChild(tokFence);
 mutate();
 await flush(); // token gate: mint + src swap + load all settle in microtasks
@@ -730,7 +731,7 @@ if (tokenFetches.length !== 1) {
 console.log("✓ video src gains dsh_tok (single mint):", tokVideo.src);
 
 // (b) A second mount of the SAME file reuses the cached token — no new fetch.
-const tokFence2 = makeCodeBlock("video", '```video\n{"path":"/tmp/media/tok.mp4"}\n```');
+const tokFence2 = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/media/tok.mp4"}\n```');
 body.appendChild(tokFence2);
 mutate();
 await flush();
@@ -740,7 +741,7 @@ if (tokenFetches.length !== 1) {
 console.log("✓ second mount of the same file reuses the cached token");
 
 // (c) Audio is never tokenized (its fetch runs in the page stack w/ cookie).
-const tokAudioFence = makeCodeBlock("audio", '```audio\n{"path":"/tmp/media/tok-audio.mp3"}\n```');
+const tokAudioFence = makeCodeBlock("mip-audio", '```mip-audio\n{"path":"/tmp/media/tok-audio.mp3"}\n```');
 body.appendChild(tokAudioFence);
 mutate();
 await flush();
@@ -756,7 +757,7 @@ console.log("✓ audio mounts are not tokenized");
 
 // (d) A tc retry keeps the token (container the browser cannot decode).
 nextTok = "TOK-A"; // stable for this file
-const tokMkvFence = makeCodeBlock("video", '```video\n{"path":"/tmp/media/tok-demo.mkv"}\n```');
+const tokMkvFence = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/media/tok-demo.mkv"}\n```');
 body.appendChild(tokMkvFence);
 mutate();
 await flush();
@@ -770,7 +771,7 @@ console.log("✓ tc retry keeps dsh_tok:", tokMkv.src);
 
 // (e) Mint failure → degrade to the bare URL (older host / network down).
 fetchMode = "reject";
-const tokFailFence = makeCodeBlock("video", '```video\n{"path":"/tmp/media/tok-fail.mp4"}\n```');
+const tokFailFence = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/media/tok-fail.mp4"}\n```');
 body.appendChild(tokFailFence);
 mutate();
 await flush();
@@ -785,7 +786,7 @@ console.log("✓ mint failure degrades to the bare URL (no token)");
 // swaps in the fresh token.
 fetchMode = "ok";
 nextTok = "TOK-B";
-const rotFence = makeCodeBlock("video", '```video\n{"path":"/tmp/media/tok-rot.mp4"}\n```');
+const rotFence = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/media/tok-rot.mp4"}\n```');
 body.appendChild(rotFence);
 mutate();
 await flush();
@@ -810,6 +811,109 @@ console.log("✓ secret rotation self-heals via forced re-mint:", rotV.src);
 globalThis.fetch = realFetch; // restore the real (absent) fetch for dispose
 
 // ---------------------------------------------------------------------------
+// Scenario 26: a failed img card now says WHY. An <img> error event carries no
+// status, so the card probes the same URL once (HEAD, same-origin) and appends
+// the verdict; a path that is neither absolute nor workspace-relative also gets
+// a hint. Reported bug: a `~`-abbreviated fence path rendered an opaque
+// "img 加载失败" while the file was plainly on disk, so the failure looked like a
+// client defect. The `~` form must also survive URL building unchanged (the
+// route expands it — see the host test).
+// ---------------------------------------------------------------------------
+
+const probes = [];
+globalThis.fetch = (url, opts) => {
+  probes.push(`${opts?.method ?? "GET"} ${url}`);
+  return Promise.resolve({ status: 404, statusText: "Not Found" });
+};
+const tildeFence = makeCodeBlock("mip-img", '```mip-img\n{"path":"~/.dsh/tmp/ste-layout.png"}\n```');
+body.appendChild(tildeFence);
+mutate();
+const tildeGrid = body.querySelectorAll(".img-preview-grid").at(-1);
+const tildeCardImg = tildeGrid.querySelector("img");
+if (!tildeCardImg.src.endsWith("/files/~/.dsh/tmp/ste-layout.png")) {
+  throw new Error(`tilde path must survive URL building, got: ${tildeCardImg.src}`);
+}
+tildeCardImg.dispatchEvent("error");
+await flush();
+const tildeText = tildeGrid.textContent;
+if (!tildeText.includes("img 加载失败：~/.dsh/tmp/ste-layout.png")) {
+  throw new Error(`failure card must still name the path, got: ${tildeText}`);
+}
+if (!tildeText.includes("HTTP 404")) {
+  throw new Error(`failure card must report the HTTP verdict, got: ${tildeText}`);
+}
+if (probes.length === 0 || probes.some((p) => !p.startsWith("HEAD "))) {
+  throw new Error(`the status probe must be a single HEAD, got: ${probes.join(" | ")}`);
+}
+if (!probes.some((p) => p.includes("/files/~/.dsh/tmp/ste-layout.png"))) {
+  throw new Error(`the probe must hit the SAME url, got: ${probes.join(" | ")}`);
+}
+if (tildeText.includes("既不是绝对路径")) {
+  throw new Error("a ~ path is not a bare relative path: no root-relative hint expected");
+}
+console.log("✓ img failure card reports the HTTP verdict (HEAD probe, ~ path kept)");
+
+// (b) A genuinely root-relative path gets the extra "use the tool's path" hint.
+probes.length = 0;
+const relFence = makeCodeBlock("mip-img", '```mip-img\n{"path":"tmp/nope.png"}\n```');
+body.appendChild(relFence);
+mutate();
+const relGrid = body.querySelectorAll(".img-preview-grid").at(-1);
+relGrid.querySelector("img").dispatchEvent("error");
+await flush();
+if (!relGrid.textContent.includes("既不是绝对路径")) {
+  throw new Error(`a relative-path 404 must hint at the tool path, got: ${relGrid.textContent}`);
+}
+console.log("✓ relative-path 404 adds the use-the-tool-path hint");
+
+globalThis.fetch = realFetch;
+
+// ---------------------------------------------------------------------------
+// Scenario 27: the bare `img`/`video`/`audio` tags of ≤1.3.x are NOT claimed any
+// more (v1.4.0 renamed the fences to the namespaced mip-* tags). This is the
+// whole point of the rename: another installed plugin can claim those generic
+// tags (the third-party img-preview ships ```img itself), and since no core
+// registry arbitrates a fence tag, two claimants both mount and one fence shows
+// two figures. A legacy fence must stay an untouched code block: no mount node,
+// no hidden source.
+// ---------------------------------------------------------------------------
+
+const legacyCases = [
+  ["img", '```img\n{"path":"/tmp/media/legacy.png"}\n```', ".img-preview-grid"],
+  ["video", '```video\n{"path":"/tmp/media/legacy.mp4"}\n```', "video"],
+  ["audio", '```audio\n{"path":"/tmp/media/legacy.mp3"}\n```', "audio"]
+];
+for (const [tag, fenceBody, probe] of legacyCases) {
+  const msg = new FakeElement("div");
+  body.appendChild(msg);
+  const legacy = makeCodeBlock(tag, fenceBody);
+  msg.appendChild(legacy);
+  const tail = new FakeElement("p"); // a following sibling: the fence IS settled
+  tail.textContent = "after";
+  msg.appendChild(tail);
+  mutate();
+  if (msg.querySelectorAll(probe).length !== 0) {
+    throw new Error(`legacy \`\`\`${tag} fence must NOT mount (tag belongs to other plugins)`);
+  }
+  if (legacy.style.display === "none") {
+    throw new Error(`legacy \`\`\`${tag} fence must keep its source visible`);
+  }
+}
+console.log("✓ legacy img/video/audio tags are no longer claimed (mip-* only)");
+
+// The namespaced tag in the SAME shape still mounts — guards against a rename
+// that accidentally kills detection altogether.
+const sanityMsg = new FakeElement("div");
+body.appendChild(sanityMsg);
+const sanityFence = makeCodeBlock("mip-img", '```mip-img\n{"path":"/tmp/media/sanity.png"}\n```');
+sanityMsg.appendChild(sanityFence);
+mutate();
+if (sanityMsg.querySelectorAll(".img-preview-grid").length !== 1) {
+  throw new Error("the namespaced mip-img tag must still mount");
+}
+console.log("✓ namespaced tag still mounts (rename did not break detection)");
+
+// ---------------------------------------------------------------------------
 // Scenario 25: settle re-render inserts the replacement wrapper AFTER the
 // surviving figure (the REAL React ordering — the settle parse keys markdown
 // blocks by array index while the streaming parse keys them by absolute text
@@ -826,7 +930,7 @@ const staleMsg = new FakeElement("div");
 body.appendChild(staleMsg);
 const settleLead = new FakeElement("p");
 settleLead.textContent = "lead";
-const settleFence1 = makeCodeBlock("img", '```img\n{"path":"/tmp/media/settle_dup.png"}\n```', { withInfostring: "" });
+const settleFence1 = makeCodeBlock("mip-img", '```mip-img\n{"path":"/tmp/media/settle_dup.png"}\n```', { withInfostring: "" });
 const settleTail = new FakeElement("p");
 settleTail.textContent = "after fence";
 staleMsg.appendChild(settleLead);
@@ -842,7 +946,7 @@ if (!earlyGrid || earlyGrid.className !== "img-preview-grid") throw new Error("s
 // surviving figure (its next known fiber sibling is the trailing paragraph).
 staleMsg.children.splice(staleMsg.children.indexOf(settleFence1), 1);
 settleFence1.parentElement = null;
-const settleFence2 = makeCodeBlock("img", '```img\n{"path":"/tmp/media/settle_dup.png"}\n```'); // settled: infostring = "img"
+const settleFence2 = makeCodeBlock("mip-img", '```mip-img\n{"path":"/tmp/media/settle_dup.png"}\n```'); // settled: infostring = "img"
 const afterGridIdx = staleMsg.children.indexOf(earlyGrid) + 1;
 staleMsg.children.splice(afterGridIdx, 0, settleFence2);
 settleFence2.parentElement = staleMsg;
@@ -869,7 +973,7 @@ const staleVMsg = new FakeElement("div");
 body.appendChild(staleVMsg);
 const settleVLead = new FakeElement("p");
 settleVLead.textContent = "vlead";
-const vFence1 = makeCodeBlock("video", '```video\n{"path":"/tmp/media/settle_vid.mp4"}\n```', { withInfostring: "" });
+const vFence1 = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/media/settle_vid.mp4"}\n```', { withInfostring: "" });
 const vTail = new FakeElement("p");
 vTail.textContent = "vtail";
 staleVMsg.appendChild(settleVLead);
@@ -883,7 +987,7 @@ if (!vEarlyFig || vEarlyFig.querySelectorAll("video").length !== 1) {
 }
 staleVMsg.children.splice(staleVMsg.children.indexOf(vFence1), 1);
 vFence1.parentElement = null;
-const vFence2 = makeCodeBlock("video", '```video\n{"path":"/tmp/media/settle_vid.mp4"}\n```');
+const vFence2 = makeCodeBlock("mip-video", '```mip-video\n{"path":"/tmp/media/settle_vid.mp4"}\n```');
 const vAfterIdx = staleVMsg.children.indexOf(vEarlyFig) + 1;
 staleVMsg.children.splice(vAfterIdx, 0, vFence2);
 vFence2.parentElement = staleVMsg;
@@ -904,8 +1008,8 @@ console.log("✓ settle re-render behind the figure: stale duplicate evicted, si
 // two real mounts — a mount owned by a live wrapper must never be evicted.
 const dupMsg = new FakeElement("div");
 body.appendChild(dupMsg);
-const dupA = makeCodeBlock("img", '```img\n{"path":"/tmp/media/twice.png"}\n```');
-const dupB = makeCodeBlock("img", '```img\n{"path":"/tmp/media/twice.png"}\n```');
+const dupA = makeCodeBlock("mip-img", '```mip-img\n{"path":"/tmp/media/twice.png"}\n```');
+const dupB = makeCodeBlock("mip-img", '```mip-img\n{"path":"/tmp/media/twice.png"}\n```');
 dupMsg.appendChild(dupA);
 dupMsg.appendChild(dupB);
 mutate();

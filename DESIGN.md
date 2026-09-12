@@ -11,8 +11,9 @@
 
 - **一个插件、三种围栏、一个扫描循环**。client 单 observer/单 interval/单 `handled` Map，
   检测一次分派渲染（img 卡片 vs 播放器 figure）。
-- **保留两个工具名**：`img_serve`（图片）+ `media_serve`（视频/音频）——agent 习惯与
-  systemPrompt 连续性，且参数/返回形状各自最小。
+- **两个工具**：`mip_img`（图片）+ `mip_media`（视频/音频）——各自参数/返回形状最小。
+  v1.4.0 起工具名带命名空间：**工具名是全局注册的**，`img_serve`/`media_serve` 这类通用名与
+  第三方 img-preview 插件**完全同名**（硬冲突，比围栏标签更严重），故与围栏标签一并改名。
 - **保留两条路由**（各自独立，互不影响）：
   - `/plugins/dsh-media-inline-preview/files`（图片：整读 128 MiB、TGA→PNG、ACAO *）
   - `/plugins/dsh-media-inline-preview/media`（媒体：流式 Range 2 GiB、`?tc=1` 转码）
@@ -21,12 +22,18 @@
 - **冲突分析（合并的核心风险）**：原 img-preview client 的宽松兜底——"body 能解析成
   带 `path` 的 JSON 就当图片"——会**把 video/audio 围栏误认成图片**（`{"path":"x.mp4"}`
   是合法 img spec 形状）。因此合并版的检测改为**三级防冲突**：
-  1. infostring 文本恰为 `img`/`video`/`audio`（真实 DOM 主检测，流式期间 infostring 为空）；
-  2. 文本以 ```` ```img ```` / ```` ```video ```` / ```` ```audio ```` 开头（字面标签兜底）；
+  1. infostring 文本恰为 `mip-img`/`mip-video`/`mip-audio`（真实 DOM 主检测，流式期间 infostring 为空）；
+  2. 文本以 ```` ```mip-img ```` / ```` ```mip-video ```` / ```` ```mip-audio ```` 开头（字面标签兜底）；
   3. JSON spec 按 `path` 扩展名在**互斥扩展名集合**里推断种类（裸 JSON 体也不会跨类误触发；
      `.webm` 归 video——`<video>` 元素可播纯音频 webm）。
   代价：img-preview 对"裸 ```json 围栏里的 img spec"的宽松识别被收窄为"扩展名可推断才认"，
-  与 video/audio 行为一致，且 systemPrompt 教学始终用显式 ```img 围栏，无实际损失。
+  与 video/audio 行为一致，且 systemPrompt 教学始终用显式 ```mip-img 围栏，无实际损失。
+- **标签命名空间（v1.4.0，破坏性）**：围栏标签改名为 `mip-img` / `mip-video` / `mip-audio`，旧的
+  裸标签 `img` / `video` / `audio` **不再识别**。原因是实测发现第三方 `img-preview` 插件发的就是
+  ```` ```img ````（本插件正是从它移植而来），而 DSH 核心**没有围栏注册表**、也没有客户端插件的
+  标签仲裁——每个插件各自扫 DOM，两个认领者会**双双挂载**，一个围栏显示两份媒体。命名空间是
+  生态里的既有做法（如 `@bhzhangsun/dsh-media` 用 ```` ```dsh-media ````）。附带实现要点：正文里
+  fence 标记的剥离正则必须是 `[a-z][a-z0-9-]*`，`[a-z]+` 会把 `mip-img` 吃成 `mip` 而静默失效。
 - **移植而非重写**：TGA 解码器（uncompressed/RLE、8/15/16/24/32 位、调色板、上下/左右翻转）、
   纯 JS PNG 编码器（zlib deflate、CRC32、filter 0）、lightbox（滚轮缩放/拖拽平移/双击切换/
   顶部工具条/底部提示）、卡片+网格渲染，全部**逐行移植自本地 img-preview 副本**（含用户
@@ -51,13 +58,13 @@
 
 ## 2. 围栏语法
 
-```img
+```mip-img
 {"path":"绝对路径或工作区相对路径","label":"可选标题"}
 ```
-```video
+```mip-video
 {"path":"...","label":"..."}
 ```
-```audio
+```mip-audio
 {"path":"...","label":"..."}
 ```
 
@@ -84,8 +91,8 @@
 
 ### host 半（lib/index.js，ESM，零第三方依赖）
 - `inject = ["systemPrompt"]`；`apply(ctx)`：
-  1. `ctx.systemPrompt.section({name:"dsh-media-inline-preview:fence", order:115, text})` —— 三围栏教学 + **主动触发**规则（下载/生成/转换/用户提到的媒体文件 → 先 `img_serve`/`media_serve` 校验再发围栏，不要问"要不要看"）+ 去重规则。
-  2. `tools.register(img_serve)` / `tools.register(media_serve)`：参数 `{path}`；返回 `{ok, [kind], path, url, error}`。校验：路径解析（绝对/相对，multi-root 遍历，**文件缺失回退也过包含检查**，逃逸一律 null）→ 会话 cwd（`exec.agent.session.header.cwd`）优先 + 已注册 workspace 根 + `DSH_WORKSPACE` + cwd → 扩展名白名单 → 文件存在。
+  1. `ctx.systemPrompt.section({name:"dsh-media-inline-preview:fence", order:115, text})` —— 三围栏教学 + **主动触发**规则（下载/生成/转换/用户提到的媒体文件 → 先 `mip_img`/`mip_media` 校验再发围栏，不要问"要不要看"）+ 去重规则。
+  2. `tools.register(mip_img)` / `tools.register(mip_media)`：参数 `{path}`；返回 `{ok, [kind], path, url, error}`。校验：路径解析（绝对/相对，multi-root 遍历，**文件缺失回退也过包含检查**，逃逸一律 null）→ 会话 cwd（`exec.agent.session.header.cwd`）优先 + 已注册 workspace 根 + `DSH_WORKSPACE` + cwd → 扩展名白名单 → 文件存在。
   3. `webServer.register({kind:"prefix", path: FILES_ROUTE, handler})`（图片）+ `webServer.register({kind:"prefix", path: MEDIA_ROUTE, handler})`（媒体）：
       - **每个请求先过 trust-fence**（better-sidebar 同款：Host loopback/trustedHosts + sec-fetch-site + Origin 匹配；实现逐行对齐官方 `@deepseek-ai/dsh-client-connection` 的 `isTrustedApiRequest`/`isTrustedAuthority`）；`webRuntime` 服务拿 `trustedHosts`，反射拿不到就退化为纯 loopback 检查（安全侧失败）。
       - 图片路由：`GET/HEAD /<绝对路径>`（整串 decode），200 全量 / 404/403/415/413；TGA→PNG；`ACAO *`（img-preview 兼容）。
@@ -123,7 +130,7 @@
 1. 装后 `plugin_status` 确认行 active；日志无报错。
 2. host 路由（curl，回环 Host）：媒体路由 200 全量 / `Range: bytes=0-99` → 206 + 正确 Content-Range / 非法 range → 416；图片路由 200 + 正确 Content-Type；trust-fence（非回环 Host / cross-site / Origin 不匹配 → 403）。
 3. TGA 转码：host 单测已覆盖解码/编码往返（24-bit/RLE/调色板 + PNG 签名/IHDR/IDAT 校验）；e2e 造一个 .tga 走图片路由确认返回 `image/png`。
-4. 真实会话：对工作区已下载的 `xhs_*.mp4` / `xhs_*.mp3` 调 `media_serve` + 发围栏，工作区任一 png 走 `img_serve` + ```img 围栏 → 用户在聊天里看到播放器/图片卡片并实际播放/查看（人工确认，这是唯一能证明 client 渲染的路径）。
+4. 真实会话：对工作区已下载的 `xhs_*.mp4` / `xhs_*.mp3` 调 `mip_media` + 发围栏，工作区任一 png 走 `mip_img` + ```mip-img 围栏 → 用户在聊天里看到播放器/图片卡片并实际播放/查看（人工确认，这是唯一能证明 client 渲染的路径）。
 5. 转码路径：造一个小 mkv（ffmpeg 生成）验证 `?tc=1` 兜底（client 冒烟已覆盖状态机；host 端真转码在 e2e 验证）。
 6. 重开会话（reload）后围栏仍渲染（文本持久化 + 确定性 URL）。
 

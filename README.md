@@ -5,7 +5,7 @@
 
 > 🇬🇧 English: [README.en.md](README.en.md)
 
-**DeepSeek Harness（DSH）聊天的全能媒体展示器**——一个插件、三种围栏（`` ```img `` / `` ```video `` / `` ```audio ``）、覆盖 **36 种本地媒体格式**。图片渲染成卡片 + 全屏 Lightbox 查看器，视频/音频渲染成原生播放器，全部**内联在聊天消息里**：不走侧边栏、不弹新标签页、流式输出过程中即可挂载播放。合并并取代了原先独立的 img-preview（图片围栏）与 video/audio 围栏插件。
+**DeepSeek Harness（DSH）聊天的全能媒体展示器**——一个插件、三种围栏（`` ```mip-img `` / `` ```mip-video `` / `` ```mip-audio ``）、覆盖 **36 种本地媒体格式**。图片渲染成卡片 + 全屏 Lightbox 查看器，视频/音频渲染成原生播放器，全部**内联在聊天消息里**：不走侧边栏、不弹新标签页、流式输出过程中即可挂载播放。合并并取代了原先独立的 img-preview（图片围栏）与 video/audio 围栏插件。
 
 ## 📱 效果预览
 
@@ -32,31 +32,33 @@
 - **带宽友好**——两条路由均支持 ETag / `If-None-Match` 条件请求（未变更文件 304 零传输）；TGA→PNG 与 ffmpeg 转码结果磁盘缓存；播放器 IntersectionObserver 懒加载，滚到视口才开始。
 - **围栏即 Markdown**——会话历史原生保留围栏，刷新页面媒体永不丢失。
 - **流式提前挂载**——消息还在流式输出时，已闭合的媒体围栏即刻挂载播放，不用等整条消息结束。
-- **零配置**——装完即用：会话中出现或产出的媒体文件，agent 先调 `img_serve` / `media_serve` 校验再发围栏，卡片/播放器自动出现在消息里；也可以手写围栏（见下）。
+- **零配置**——装完即用：会话中出现或产出的媒体文件，agent 先调 `mip_img` / `mip_media` 校验再发围栏，卡片/播放器自动出现在消息里；也可以手写围栏（见下）。
 
 ## 围栏语法
 
-```img
+```mip-img
 {"path":"/绝对路径/图片.png","label":"可选标题"}
 ```
-```video
+```mip-video
 {"path":"/绝对路径/视频.mp4","label":"可选标题"}
 ```
-```audio
+```mip-audio
 {"path":"/绝对路径/音乐.mp3","label":"可选标题"}
 ```
+
+> **围栏标签是带命名空间的 `mip-*`（v1.4.0 起，破坏性变更）**：`img` / `video` / `audio` 这类通用词别的插件也会用（第三方 img-preview 插件发的就是 ```img），而 DSH 核心没有围栏注册表来仲裁——每个客户端插件各自扫 DOM，两个插件认领同一个标签就会双双挂载，一个围栏显示两份媒体。因此改名为 `mip-img` / `mip-video` / `mip-audio`，**旧的裸标签不再被识别**（会保持为普通代码块）。
 
 `label` 字段仍会解析（兼容手写围栏），但 UI 标题**固定只显示文件名**。多图宫格：`{"images":[{"path":"..."},{"path":"..."}]}`。
 
 ## 架构（house pattern）
 
-- **host（`lib/index.js`）**——`systemPrompt.section` 注入统一围栏教学（三围栏 + 主动触发 + 去重）；`img_serve` / `media_serve` 工具校验路径并返回 `{ok, ..., path, url}`；两条前缀路由：
+- **host（`lib/index.js`）**——`systemPrompt.section` 注入统一围栏教学（三围栏 + 主动触发 + 去重）；`mip_img` / `mip_media` 工具校验路径并返回 `{ok, ..., path, url}`；两条前缀路由：
   - `/plugins/dsh-media-inline-preview/files`——图片路由（整读、128 MiB 上限、TGA→PNG 即时转码 + 磁盘缓存、`ACAO *`）
   - `/plugins/dsh-media-inline-preview/media`——媒体路由（Range 流式、2 GiB 上限、`?tc=1` 转码回退）
   - `/plugins/dsh-media-inline-preview/token` + `__media_auth`——**文件级 HMAC 令牌**（`?dsh_tok=`）：按文件 realpath 绑定的凭据，供 nginx `auth_request` 校验，让无 cookie 的系统媒体管线（如 Android stagefright，独立进程取流、不带浏览器 cookie）也能穿过 cookie 门控的反向代理；secret 部署时自动生成（0600，工作区外），支持热轮换（失败重试时强制重签自愈）。
 - **client（`lib/client.js`）**——`window.__ModuleLoader__` 注册；增量 MutationObserver 扫描（rAF 合并 + 3s 全量兜底），**三级防冲突检测**：
-  1. `div.infostring` 文本精确等于 `img`/`video`/`audio`（主判定；流式期间为空，半截围栏永不匹配）
-  2. 文本以 `` ```img `` / `` ```video `` / `` ```audio `` 开头（表面兜底）
+  1. `div.infostring` 文本精确等于 `mip-img`/`mip-video`/`mip-audio`（主判定；流式期间为空，半截围栏永不匹配）
+  2. 文本以 `` ```mip-img `` / `` ```mip-video `` / `` ```mip-audio `` 开头（表面兜底）
   3. JSON spec 按 `path` 扩展名推断种类（互斥扩展名集合——裸 JSON 体不会跨类误触发）
   
   wrapper 内嵌套的 `pre` 跳过（单一挂载目标，不重复挂载）；播放失败自动 `?tc=1` 重试，二次失败换错误卡片。
@@ -66,7 +68,7 @@
 
 ## 使用
 
-安装后零配置：会话中出现或产出图片/视频/音频时，agent 自动先调 `img_serve` / `media_serve` 再发围栏，卡片/播放器直接出现在消息里。也可以手写上面的围栏。
+安装后零配置：会话中出现或产出图片/视频/音频时，agent 自动先调 `mip_img` / `mip_media` 再发围栏，卡片/播放器直接出现在消息里。也可以手写上面的围栏。
 
 ## 测试
 

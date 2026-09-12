@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, statSync } from "node:fs";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import { Writable } from "node:stream";
@@ -34,7 +34,8 @@ const {
   IMAGE_EXTS, VIDEO_TRANSCODE_EXTS, AUDIO_TRANSCODE_EXTS, inject,
   TOKEN_ROUTE, AUTH_ROUTE, TOKEN_PARAM, TOKEN_SECRET_FILE,
   tokenSecret, mintToken, verifyTokenForPath, resolveMediaReal, verifyRequestToken,
-  createTokenIssuerHandler, createAuthVerifierHandler, createMediaHandler, MEDIA_ROUTE
+  createTokenIssuerHandler, createAuthVerifierHandler, createMediaHandler, createImageHandler, MEDIA_ROUTE, FILES_ROUTE,
+  createImgServeTool, createMediaServeTool, MEDIA_SECTION_TEXT
 } = await import("../lib/index.js");
 
 // ---------------------------------------------------------------------------
@@ -62,6 +63,14 @@ assert.equal(
 );
 assert.equal(resolveLocalPath("a/b.png", ["/nonexistent/root", rootDir]), "/nonexistent/root/a/b.png");
 await (await import("node:fs/promises")).rm(probeFile, { force: true });
+// Leading tilde: "~" and "~/" expand to the home directory (the fence
+// abbreviation case that used to 404 silently), "~otheruser" stays literal (no
+// passwd lookup, so it can never widen the fence), and expansion does NOT skip
+// the containment check — a home dir outside every root is still refused.
+assert.equal(resolveLocalPath("~", [homedir()]), homedir());
+assert.equal(resolveLocalPath("~/dsh-mip-absent/x.png", [homedir()]), join(homedir(), "dsh-mip-absent", "x.png"));
+assert.equal(resolveLocalPath("~nobody/x.png", [homedir()]), join(homedir(), "~nobody", "x.png"));
+assert.equal(resolveLocalPath("~/x.png", roots), null);
 console.log("✓ resolveLocalPath containment (incl. .. fallback escape closed)");
 
 // ---------------------------------------------------------------------------
@@ -192,6 +201,41 @@ assert.equal(kindForExt(".txt"), null);
 assert.equal(kindForExt(""), null);
 for (const ext of IMAGE_EXTS) assert.ok(CONTENT_TYPES[ext], `CONTENT_TYPES missing ${ext}`);
 console.log("✓ kindForExt + CONTENT_TYPES coverage");
+
+// ---------------------------------------------------------------------------
+// Fence-tag + tool-name contract (v1.4.0 rename): the host side names them in
+// exactly two places — the system-prompt section and the serve-tool result
+// text. The model copies whatever those say, so both must carry the namespaced
+// names and must never advertise a bare tag again; a silent revert would
+// re-create the collision with other plugins shipping ```img/```video/```audio
+// or registering img_serve/media_serve.
+// ---------------------------------------------------------------------------
+
+for (const tag of ["mip-img", "mip-video", "mip-audio"]) {
+  assert.ok(MEDIA_SECTION_TEXT.includes("```" + tag), `prompt section must document the ${tag} fence`);
+}
+// No bare-tag fence EXAMPLE anywhere (a bare tag in prose, single-backticked, is
+// fine — that is how the section warns about them).
+assert.equal(/\n```(img|video|audio)\s/.test(MEDIA_SECTION_TEXT), false, "prompt section must not show a bare fence example");
+// The prompt must name the namespaced TOOLS too (tool names are global: a second
+// media plugin registering img_serve/media_serve collides outright).
+assert.ok(MEDIA_SECTION_TEXT.includes("mip_img") && MEDIA_SECTION_TEXT.includes("mip_media"), "prompt section must name the mip_* tools");
+assert.equal(MEDIA_SECTION_TEXT.includes("img_serve") || MEDIA_SECTION_TEXT.includes("media_serve"), false, "prompt section must not advertise the old tool names");
+
+const imgTool = createImgServeTool(() => []);
+assert.equal(imgTool.name, "mip_img");
+const imgRender = imgTool.output.render({}, { ok: true, path: "/tmp/x.png", url: "/u" })[0].text;
+assert.ok(imgRender.includes("```mip-img"), `mip_img result must name the mip-img fence: ${imgRender}`);
+assert.ok(imgRender.startsWith("mip_img:"), `mip_img result must be prefixed with the tool name: ${imgRender}`);
+
+const mediaTool = createMediaServeTool(() => []);
+assert.equal(mediaTool.name, "mip_media");
+const videoRender = mediaTool.output.render({}, { ok: true, kind: "video", path: "/tmp/x.mp4", url: "/u" })[0].text;
+const audioRender = mediaTool.output.render({}, { ok: true, kind: "audio", path: "/tmp/x.mp3", url: "/u" })[0].text;
+assert.ok(videoRender.includes("```mip-video"), `mip_media(video) result must name mip-video: ${videoRender}`);
+assert.ok(audioRender.includes("```mip-audio"), `mip_media(audio) result must name mip-audio: ${audioRender}`);
+assert.ok(videoRender.startsWith("mip_media:"), `mip_media result must be prefixed with the tool name: ${videoRender}`);
+console.log("✓ fence-tag + tool-name contract (mip-* in prompt section + tool results)");
 
 // ---------------------------------------------------------------------------
 // Client/host transcode-extension sets must stay in sync (both sides maintain
@@ -393,6 +437,48 @@ await media(
 assert.equal(res.status, 200, "media: trusted host, no token → 200 (unchanged behavior)");
 await new Promise((r) => res.on("finish", r)); // drain the stream before teardown
 console.log("✓ media route accepts a valid token in lieu of the fence");
+
+// ---------------------------------------------------------------------------
+// Image route + leading-tilde paths — the reported bug: a fence spec that
+// abbreviates the absolute path its serve tool returned (/home/<user>/… →
+// ~/…) rendered "img 加载失败" in the chat while the file was plainly there.
+// The route must serve it, and still refuse a tilde path that leaves the roots.
+// ---------------------------------------------------------------------------
+
+const realHome = process.env.HOME;
+const fakeHome = mkdtempSync(join(tmpdir(), "dsh-mip-home-"));
+const pngSig = Buffer.from("89504e470d0a1a0a", "hex"); // signature bytes: the route is a byte pipe
+writeFileSync(join(fakeHome, "tilde-pic.png"), pngSig);
+process.env.HOME = fakeHome; // homedir() reads $HOME on POSIX
+try {
+  const image = createImageHandler(getHosts, () => [fakeHome]);
+  let r = fakeRes();
+  // Exactly the browser's URL shape: the client percent-encodes the path as one
+  // string, so "~/.…/x.png" arrives as "~%2F…".
+  await image({ method: "GET", url: `${FILES_ROUTE}/~%2Ftilde-pic.png`, headers: { host: "127.0.0.1:3080" } }, r);
+  assert.equal(r.status, 200, "image: ~/… inside the home root → 200");
+  assert.equal(r.headers["content-type"], "image/png");
+  assert.equal(r.body, pngSig.toString(), "image: tilde request must return the file bytes");
+
+  r = fakeRes();
+  await image({ method: "GET", url: `${FILES_ROUTE}/~%2Fabsent.png`, headers: { host: "127.0.0.1:3080" } }, r);
+  assert.equal(r.status, 404, "image: tilde path to a missing file → 404 (clear, not silent)");
+
+  r = fakeRes();
+  await image({ method: "GET", url: `${FILES_ROUTE}/~%2Ftilde-pic.png`, headers: { host: "127.0.0.1:3080" } }, r);
+  assert.equal(r.status, 200, "image: sanity — same request twice stays 200");
+} finally {
+  if (realHome === undefined) delete process.env.HOME;
+  else process.env.HOME = realHome;
+}
+// Expansion must not become an escape hatch: with the temp test root as the
+// ONLY allowed root, a tilde path pointing at the (different) home is refused.
+const imageFenced = createImageHandler(getHosts, () => [rootDir]);
+const rFenced = fakeRes();
+await imageFenced({ method: "GET", url: `${FILES_ROUTE}/~%2Ftilde-pic.png`, headers: { host: "127.0.0.1:3080" } }, rFenced);
+assert.equal(rFenced.status, 403, "image: tilde path outside every allowed root → 403 (fence intact)");
+rmSync(fakeHome, { recursive: true, force: true });
+console.log("✓ image route serves leading-tilde paths (containment still enforced)");
 
 gateStub.close();
 rmSync(tokenDir, { recursive: true, force: true });

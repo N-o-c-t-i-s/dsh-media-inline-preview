@@ -4,6 +4,60 @@ All notable changes to dsh-media-inline-preview are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-09-12
+
+### Changed — BREAKING
+- **Fence tags renamed to the namespaced `mip-img` / `mip-video` / `mip-audio`.**
+  The bare `img` / `video` / `audio` tags are **no longer recognized** — such a
+  block now stays an ordinary code block. Reason: those words are claimed by
+  other plugins too (the third-party `img-preview` plugin ships the very same
+  ```` ```img ```` fence), and nothing arbitrates a fence tag — DSH core has no
+  fence registry and every client plugin scans the DOM on its own, so two
+  claimants both mount and one fence shows two figures. Namespacing is the
+  ecosystem's existing answer (e.g. `@bhzhangsun/dsh-media` uses
+  ```` ```dsh-media ````). Migration: rename the tag in new and stored fences;
+  the system-prompt section, both serve-tool result texts and the READMEs all
+  carry the new tag.
+- Fence-marker stripping in the spec parser now accepts tags containing `-`
+  (`[a-z][a-z0-9-]*`): the previous `[a-z]+` swallowed only `mip` of `mip-img`,
+  which would have silently killed the literal-tag detection tier.
+- **The tools were renamed too: `img_serve` → `mip_img`, `media_serve` →
+  `mip_media`.** Tool names are registered GLOBALLY, so a generic name is a hard
+  collision (the third-party img-preview plugin registers `img_serve` as well —
+  a sharper conflict than the fence tag, which at least only double-renders).
+  No aliases are kept: an alias would preserve exactly the collision the rename
+  removes. Every reference (prompt section, tool descriptions, tool result text,
+  the client's failure hint, READMEs, DESIGN) was updated.
+
+### Added
+- Test coverage for the rename: the client smoke test asserts a legacy
+  `img`/`video`/`audio` fence is NOT mounted and keeps its source visible, that
+  the namespaced tag in the same shape still mounts, and the host test asserts
+  the tag + tool-name contract in the prompt section and in both tools' result
+  text.
+
+## [1.3.0] - 2026-09-12
+
+### Added
+- Leading-tilde support: a fence path written as `~/.dsh/pic.png` (or bare `~`)
+  is now expanded to the current user's home directory before root containment
+  is checked. Previously `~` was treated as a LITERAL directory name, so the
+  lookup missed and the browser showed "img 加载失败" for a file that plainly
+  existed — the spec routinely abbreviates the long absolute path a serve tool
+  returned. `~otheruser/…` is still left literal (no passwd lookup), and
+  containment runs on the EXPANDED path, so nothing is widened.
+- The image card's failure line now reports the HTTP verdict (a `HEAD` probe on
+  the same URL: `404` = route cannot find it, `403` = outside the allowed roots
+  / untrusted authority, `415` = extension not served, `200` = fetched but the
+  browser cannot decode it), plus a hint when a 404 path is neither absolute
+  nor inside a workspace root. The `<img>` error event alone carries no status,
+  which is what made this failure look like a client bug.
+
+### Changed
+- The file routes `realpath` the containment-RESOLVED path instead of the raw
+  request target, so any future input rewrite in `resolveLocalPath` cannot
+  desynchronize the check from the file that is actually opened.
+
 ## [1.2.0] - 2026-09-04
 
 ### Added
