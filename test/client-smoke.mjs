@@ -1019,6 +1019,51 @@ if (dupMsg.querySelectorAll(".img-preview-grid").length !== 2) {
 console.log("✓ deliberate duplicate fences keep their own mounts (owner alive)");
 
 // ---------------------------------------------------------------------------
+// Scenario 21b: a plain JSON payload with a `url` field is NOT a media spec
+// ---------------------------------------------------------------------------
+// Tier 3 parses ANY JSON body, so a PR/API payload such as
+// {"number":8,"url":".../pull/8"} also looks like a url-only spec. While the
+// fence is streaming (infostring still empty) that used to mount a broken
+// image card over the block, hiding the code and leaving a 404 caption "8".
+// Only a URL that is actually media may claim the block.
+{
+  const prMsg = new FakeElement("div");
+  prMsg.attributes.set("data-streaming", "1");
+  body.appendChild(prMsg);
+  const prPayload = '{"state":"merged","branch":"feat/x","number":8,\n "url":".../pull/8","title":"Publish 0.2.1"}';
+  const prFence = makeCodeBlock("json", prPayload, { withInfostring: "" });
+  const prTail = new FakeElement("p");
+  prTail.textContent = "trailing text";
+  prMsg.appendChild(prFence);
+  prMsg.appendChild(prTail);
+  mutate();
+  if (prMsg.querySelectorAll(".img-preview-grid").length !== 0) {
+    throw new Error("a non-media url-only JSON payload must not mount an image card");
+  }
+  if (prMsg.querySelectorAll("video").length !== 0) {
+    throw new Error("a non-media url-only JSON payload must not mount a player");
+  }
+  if (prFence.style.display === "none") {
+    throw new Error("the JSON source block must stay visible (it is data, not media)");
+  }
+  // …while a url-only spec with a real media extension still infers its kind.
+  const realUrlFence = makeCodeBlock("json", '{"url":"https://cdn.example.com/a/shot.PNG?x=1"}', { withInfostring: "" });
+  const realUrlTail = new FakeElement("p");
+  realUrlTail.textContent = "tail";
+  prMsg.appendChild(realUrlFence);
+  prMsg.appendChild(realUrlTail); // streaming gate: the fence needs a following sibling
+  mutate();
+  if (prMsg.querySelectorAll(".img-preview-grid").length !== 1) {
+    throw new Error("a media URL must still infer an image in tier 3");
+  }
+  const realUrlImg = prMsg.querySelectorAll("img")[0];
+  if (realUrlImg.src !== "https://cdn.example.com/a/shot.PNG?x=1") {
+    throw new Error(`media URL must be kept verbatim, got: ${realUrlImg.src}`);
+  }
+  console.log("✓ url-only tier 3 requires a media URL (PR/API payloads stay code)");
+}
+
+// ---------------------------------------------------------------------------
 // Scenario 12: dispose stops everything
 // ---------------------------------------------------------------------------
 
